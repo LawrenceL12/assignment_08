@@ -1,12 +1,73 @@
-Write your reflection here.
+## 1. Core Concepts Learned and Synthesized
 
-See reflection.md for what makes a good reflection — be specific, use the
-terminology from this assignment (heatmap, violin plot, interactive chart, hover,
-Folium marker, popup, choropleth, GeoJSON, polygon, spatial join,
-point-in-polygon, coordinate reference system, projection, centroid, haversine
-distance, feature engineering, rule-based classification, validation set,
-agreement, anchor, site score), and make it actionable.
+1. **Geographic Data Manipulation and Spatial Operations with GeoPandas**:
+   - I learned how to represent spatial primitives using `gpd.GeoDataFrame` and construct point geometries from coordinates using `gpd.points_from_xy(lon, lat)` (keeping in mind that GeoPandas follows the Cartesian (x, y) = (lon, lat) ordering).
+   - I applied **point-in-polygon** spatial queries using `gpd.sjoin(..., predicate="within")` to determine which Census ZIP code **polygon** enclosed each customer's Home and Work coordinates.
+   - I deepened my understanding of **Coordinate Reference Systems (CRS)** and **projections**: geographic coordinates like `EPSG:4326` express positions in angular degrees on an ellipsoidal Earth, making area and geometric distance calculations distorted at Syracuse's latitude. To accurately compute a polygon's geometric **centroid**, we must project the geometry into a planar meters-based CRS (`EPSG:32618`, UTM Zone 18N), compute the centroid, and then project back to `EPSG:4326` for latitude and longitude mapping.
+   - I used **haversine distance** to calculate great-circle distances in kilometers (`haversine_km`) across vectorized pandas arrays, quantifying physical separation between customers, shops, and work locations.
 
-Two questions to answer along the way:
-- Why does the "where members live" map point to the wrong place?
-- What can't this data tell you? (Think about the members who live in Clay.)
+2. **Feature Engineering and Rule-Based Classification**:
+   - Starting from raw timestamps and coordinates, we engineered features critical to behavioral classification: `hour` (decimal time of day), `weekday` (binary Monday–Friday indicator), `has_work`, `d_home`, `d_work`, and `detour` ($d_{\text{home}} + d_{\text{work}} - \text{commute}$).
+   - I developed a **rule-based classification** (heuristic labeling) model in `classify_visits` to infer the latent motivation behind 36,067 transactions across five categories: `on the way to work`, `during work`, `on the way home`, `near home`, and `other`.
+   - The CENT portal acted as a hidden **validation set** representing 1,000 real survey responses. By iteratively reviewing the confusion matrix (evaluating overall **agreement** as well as per-category recall and `most_confused_with`), I optimized decision boundaries (e.g., cutting off morning commute at 9:30 a.m. rather than 10:00 a.m., constraining `during work` by proximity to the workplace `d_work <= 2.5` km, and requiring small commute detour `detour <= 2.0` km). This improved overall agreement from a baseline of ~76% to over 90.3%, with every individual label exceeding 82% agreement.
+
+3. **Anchoring Demand and Multi-Criteria Site Scoring**:
+   - Each order was converted into evidence of localized demand by identifying its geographic **anchor**: workday visits anchor to the member's `work_zip`, weekend and evening leisure visits anchor to the member's `home_zip`, while `other` visits remain unanchored.
+   - The **site score** model algorithmically synthesized aggregated demand with spatial constraints: areas within 2.5 km of our existing shops were flagged as `served` (score 0), and unserved ZIPs received a 50% penalty if a rival shop operated within 2.5 km. This produced a transparent, data-driven ranking identifying ZIP 13057 (Carrier Circle corridor) as the optimal location for shop #4.
+
+4. **Multi-Faceted Visualizations and Interactive Dashboard Design**:
+   - **Seaborn Heatmap**: Created temporal density grids (`sns.heatmap`) across day of week and hour of day, exposing diurnal and weekly demand peaks.
+   - **Seaborn Violin Plot**: Used `sns.violinplot` with `cut=0` to show the full distribution, multimodality, and long-tail spending behavior across shops and visit reasons (such as larger brunch check sizes at Westcott).
+   - **Plotly Interactive Line Charts**: Leveraged `px.line` with markers and consistent `color_discrete_map` for month-over-month trend exploration with interactive **hover** tooltips.
+   - **Folium Map**: Displayed spatial point features with interactive **popups** and **tooltips**, using green `CircleMarker` elements scaled dynamically by shop revenue alongside red rival `Marker` icons.
+   - **Plotly Choropleth Map**: Combined **GeoJSON** polygon boundaries with tabular data via `px.choropleth_map`, shading geographic zones to compare residential concentration against anchored purchasing demand.
+   - **Streamlit App Architecture**: Configured tabs with lazy evaluation (`if tab.open:` and `on_change="rerun"`) to maintain high responsiveness and isolate widget states.
+
+
+## 2. Answers to Core Strategic Questions
+
+### Why does the "where members live" map point to the wrong place?
+When mapping raw membership counts by home ZIP code (`members_by_zip`), Clay (ZIP 13041) appears to be the overwhelming frontrunner with 745 loyalty members. However, relying on this residential snapshot is a classic fallacy of location intelligence: **people do not buy coffee where they sleep during working hours; they buy coffee where their daily routines take them.**
+
+Our feature engineering and classification revealed that a large fraction of Clay residents are commuters who travel into Syracuse for work. When their transactions are classified, their purchases occur at downtown or campus shops on the way to work, during lunch breaks near work, or on their commute home. 
+
+By anchoring workday purchases to the member's `work_zip`, the demand map tells a completely different story: daytime demand concentrates heavily in employment and transit corridors—specifically ZIP 13057 (the Carrier Circle corridor). ZIP 13057 anchors thousands of visits from members working in that commercial district throughout the day, yet currently has no Salt City shop within 2.5 km and no immediate rival penalty. If the owner had opened in Clay based purely on residential addresses, the shop would have sat underutilized during peak morning and midday revenue windows while members were away at work.
+
+### What can't this data tell you? (Thinking about members who live in Clay)
+While our loyalty transaction dataset provides rich details about existing orders, it suffers from critical observation and selection biases:
+
+1. **Survivor / Selection Bias in Transaction Data**:
+   The orders dataset only records transactions that *actually occurred* at Armory Square, Westcott, or University Hill. We only observe Clay residents when they choose to visit our urban locations. We have zero data on their coffee habits when they are at home in Clay on weekends, working remotely, or commuting along routes that don't pass near our three shops.
+
+2. **Unobserved Latent Demand and Competitor Activity in Clay**:
+   Do Clay residents brew coffee at home because no premium shop is convenient, or do they frequent local drive-thrus, Dunkin', or suburban competitors along Route 31? Our dataset contains no external transaction records, regional credit card benchmarks, or foot-traffic sensor data to gauge unmet suburban demand.
+
+3. **Format and Preference Discrepancies**:
+   Urban shops (like Armory Square) thrive on pedestrian foot traffic and quick counter service. A suburban location in Clay might require a drive-thru, abundant parking, or distinct morning peak operational capacities. The existing transaction data cannot predict suburban product mix or channel preferences.
+
+4. **Non-Members and Churned Customers**:
+   The loyalty app dataset excludes non-loyalty customers and residents who uninstalled the app because Salt City lacked convenient locations near their daily routes. Consequently, zero anchored transactions in Clay does not equate to zero market potential; it simply reflects the geographic coverage of our current physical footprint.
+
+
+## 3. Metacognitive Struggles and Debugging Experience
+
+- **Spatial Projections vs. Join Geometry**:
+  Initially, it was easy to forget that `sjoin` operates directly in geographic coordinates (`EPSG:4326`) because point containment is topological, whereas calculating a geometric `centroid` on unprojected degrees introduces latitude-dependent longitude scaling distortion. Working through `to_crs(METERS_CRS).centroid.to_crs(LATLON_CRS)` reinforced the necessity of using projected coordinate systems whenever measuring distances, areas, or true physical centers.
+
+- **Classifier Error Analysis**:
+  My baseline model achieved ~76% agreement and 0% on `other` because it relied solely on clock hours. When inspecting the confusion matrix, `during work` was frequently mislabeled as `on the way to work`. Analyzing the feature distributions showed that many workers arrive before 10:00 a.m. (e.g. between 9:00 and 9:30 a.m.) and purchase coffee within 0.5 km of their workplace. By shifting `WORK_STARTS_BY` to 9.5 and introducing spatial constraints (`d_work <= 2.5` km, `detour <= 2.0` km, and requiring `has_work`), `during work` agreement increased to 91% and overall agreement rose past 90.3%.
+
+- **Pandas Vectorization vs. Loop Performance**:
+  Ensuring no explicit python loops were used in `analysis.py` required thinking strictly in terms of vectorized grouping, pivot tables, and boolean condition arrays (`np.select`). This was not only cleaner and met the AST structural tests, but also ensured sub-second runtimes over tens of thousands of rows.
+
+
+## 4. Actionable Next Steps for Further Practice
+
+1. **Advanced Spatial Indexing and Voronoi Tessellation**:
+   To advance beyond simple circular radius buffers (2.5 km), I plan to study Voronoi diagrams and travel-time isochrones using libraries like `osmnx` and OpenStreetMap network graphs. Isochrones model 5- and 10-minute driving or walking catchment areas much more realistically than Euclidean or Haversine circles.
+
+2. **Probabilistic and Supervised Classification**:
+   Rule-based heuristics are effective for cold-start problems, but as labeled survey data grows, I will experiment with probabilistic models (such as multinomial logistic regression or gradient-boosted trees) calibrated with Snorkel for weak supervision.
+
+3. **Interactive Web App Optimization**:
+   I will deepen my practice with Streamlit session state management, caching strategies (`@st.cache_data`), and component communication between Folium maps and chart selectors for bidirectional dashboard filtering.

@@ -28,7 +28,7 @@ they are easy to find and change.
 import numpy as np
 import pandas as pd
 
-from .settings import (  # noqa: F401  (OTHER: the baseline never uses it — yet)
+from .settings import (
     DURING_WORK,
     NEAR_HOME,
     ON_THE_WAY_HOME,
@@ -36,9 +36,13 @@ from .settings import (  # noqa: F401  (OTHER: the baseline never uses it — ye
     OTHER,
 )
 
-WORK_STARTS_BY = 10.0     # hour: weekday visits before this are the commute in
+WORK_STARTS_BY = 9.5      # hour: weekday visits before this are the commute in
 WORK_ENDS_BY = 15.5       # hour: weekday visits before this are during work
 EVENING_ENDS_BY = 19.5    # hour: weekday visits before this are the commute home
+
+NEAR_HOME_KM = 2.5        # distance in km to shop for "near home"
+NEAR_WORK_KM = 2.5        # distance in km from work to shop for "during work"
+MAX_DETOUR_KM = 2.0       # maximum detour in km for commute
 
 
 def classify_visits(visits: pd.DataFrame) -> pd.DataFrame:
@@ -53,13 +57,46 @@ def classify_visits(visits: pd.DataFrame) -> pd.DataFrame:
     result = visits.copy()
     weekday = result["weekday"]
     hour = result["hour"]
+    has_work = result["has_work"]
+    d_home = result["d_home"]
+    d_work = result["d_work"]
+    detour = result["detour"]
+
+    is_commute_in = (
+        weekday
+        & has_work
+        & (hour < WORK_STARTS_BY)
+        & (detour <= MAX_DETOUR_KM)
+    )
+    is_during_work = (
+        weekday
+        & has_work
+        & (hour >= WORK_STARTS_BY)
+        & (hour < WORK_ENDS_BY)
+        & (d_work <= NEAR_WORK_KM)
+    )
+    is_commute_home = (
+        weekday
+        & has_work
+        & (hour >= WORK_ENDS_BY)
+        & (hour < EVENING_ENDS_BY)
+        & (detour <= MAX_DETOUR_KM)
+    )
+    is_near_home = d_home <= NEAR_HOME_KM
+
     result["reason"] = np.select(
         [
-            weekday & (hour < WORK_STARTS_BY),
-            weekday & (hour < WORK_ENDS_BY),
-            weekday & (hour < EVENING_ENDS_BY),
+            is_commute_in,
+            is_during_work,
+            is_commute_home,
+            is_near_home,
         ],
-        [ON_THE_WAY_TO_WORK, DURING_WORK, ON_THE_WAY_HOME],
-        default=NEAR_HOME,
+        [
+            ON_THE_WAY_TO_WORK,
+            DURING_WORK,
+            ON_THE_WAY_HOME,
+            NEAR_HOME,
+        ],
+        default=OTHER,
     )
     return result

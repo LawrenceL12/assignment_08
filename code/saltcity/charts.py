@@ -31,8 +31,12 @@ def make_heatmap(table: pd.DataFrame, title: str) -> Figure:
     - `sns.heatmap(table, ax=ax, cmap="YlOrBr", linewidths=0.5)`
     - Title it, label the x axis "Hour of the day", blank the y label, return `fig`.
     """
-    # TODO: your code here
-    pass
+    fig, ax = plt.subplots(figsize=(11, 3.6))
+    sns.heatmap(table, ax=ax, cmap="YlOrBr", linewidths=0.5)
+    ax.set_title(title)
+    ax.set_xlabel("Hour of the day")
+    ax.set_ylabel("")
+    return fig
 
 
 def make_violin(frame: pd.DataFrame, by: str = "shop") -> Figure:
@@ -46,8 +50,16 @@ def make_violin(frame: pd.DataFrame, by: str = "shop") -> Figure:
     the values. Title it "What an order comes to, by <by>", label the y axis
     "Order total ($)", return the Figure.
     """
-    # TODO: your code here
-    pass
+    fig, ax = plt.subplots(figsize=(8, 4))
+    if by == "reason":
+        present = set(frame[by].dropna().unique())
+        order = [r for r in REASONS if r in present]
+    else:
+        order = sorted(frame[by].dropna().unique())
+    sns.violinplot(data=frame, x=by, y="total", order=order, ax=ax, cut=0)
+    ax.set_title(f"What an order comes to, by {by}")
+    ax.set_ylabel("Order total ($)")
+    return fig
 
 
 def make_trend(monthly: pd.DataFrame, by: str = "shop",
@@ -62,8 +74,17 @@ def make_trend(monthly: pd.DataFrame, by: str = "shop",
     hovering shows each month's numbers. For reasons, also pass
     `color_discrete_map=settings.REASON_COLORS` so each reason keeps its color.
     """
-    # TODO: your code here
-    pass
+    color_map = REASON_COLORS if by == "reason" else None
+    fig = px.line(
+        monthly,
+        x="month",
+        y=value,
+        color=by,
+        markers=True,
+        title=f"Monthly {value} by {by}",
+        color_discrete_map=color_map,
+    )
+    return fig
 
 
 def make_shop_map(shops: pd.DataFrame, orders: pd.DataFrame) -> folium.Map:
@@ -78,8 +99,33 @@ def make_shop_map(shops: pd.DataFrame, orders: pd.DataFrame) -> folium.Map:
       name as the popup.
     - `tooltip=` the shop's name on every marker.
     """
-    # TODO: your code here
-    pass
+    fmap = folium.Map(location=list(SYRACUSE), zoom_start=12)
+    revenue_by_shop = orders.groupby("shop")["total"].sum()
+    max_rev = float(revenue_by_shop.max()) if not revenue_by_shop.empty else 0.0
+
+    for row in shops.itertuples():
+        if row.kind == "ours":
+            rev = float(revenue_by_shop.get(row.shop, 0.0))
+            ratio = (rev / max_rev) if max_rev > 0 else 0.0
+            radius = 6.0 + 18.0 * ratio
+            folium.CircleMarker(
+                location=[row.lat, row.lon],
+                radius=radius,
+                color="green",
+                fill=True,
+                fill_color="green",
+                fill_opacity=0.7,
+                tooltip=row.shop,
+                popup=f"{row.shop}: ${rev:,.2f}",
+            ).add_to(fmap)
+        else:
+            folium.Marker(
+                location=[row.lat, row.lon],
+                tooltip=row.shop,
+                popup=row.shop,
+                icon=folium.Icon(color="red"),
+            ).add_to(fmap)
+    return fmap
 
 
 def make_choropleth(zips: gpd.GeoDataFrame, table: pd.DataFrame, column: str,
@@ -101,8 +147,32 @@ def make_choropleth(zips: gpd.GeoDataFrame, table: pd.DataFrame, column: str,
       text=shops["shop"], mode="markers", marker={"size": 11, "color": ...},
       name="shops")` — green for ours, red for rivals.
     """
-    # TODO: your code here
-    pass
+    values = zips[["zip"]].merge(table[["zip", column]], on="zip", how="left")
+    values[column] = values[column].fillna(0)
+    fig = px.choropleth_map(
+        values,
+        geojson=zips.__geo_interface__,
+        locations="zip",
+        featureidkey="properties.zip",
+        color=column,
+        color_continuous_scale="Oranges",
+        map_style="open-street-map",
+        center={"lat": 43.06, "lon": -76.14},
+        zoom=9.5,
+        opacity=0.75,
+        title=title,
+    )
+    if shops is not None and not shops.empty:
+        colors = ["green" if k == "ours" else "red" for k in shops["kind"]]
+        fig.add_scattermap(
+            lat=shops["lat"],
+            lon=shops["lon"],
+            text=shops["shop"],
+            mode="markers",
+            marker={"size": 11, "color": colors},
+            name="shops",
+        )
+    return fig
 
 
 def close(fig: Figure) -> None:

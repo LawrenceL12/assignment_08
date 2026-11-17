@@ -40,8 +40,14 @@ def busy_table(orders: pd.DataFrame, shop: str | None = None) -> pd.DataFrame:
     - `.reindex(index=DAY_NAMES, columns=OPEN_HOURS, fill_value=0)` puts every
       day and hour in order, even ones with no orders.
     """
-    # TODO: your code here
-    pass
+    df = orders if shop is None else orders[orders["shop"] == shop]
+    day_map = dict(enumerate(DAY_NAMES))
+    day = df["timestamp"].dt.dayofweek.map(day_map)
+    hour = df["timestamp"].dt.hour
+    table = df.assign(day=day, hour=hour).pivot_table(
+        index="day", columns="hour", values="order_id", aggfunc="count", fill_value=0
+    )
+    return table.reindex(index=DAY_NAMES, columns=OPEN_HOURS, fill_value=0)
 
 
 def reason_table(visits: pd.DataFrame, shop: str | None = None) -> pd.DataFrame:
@@ -52,8 +58,16 @@ def reason_table(visits: pd.DataFrame, shop: str | None = None) -> pd.DataFrame:
     Built like busy_table, with `reason` instead of the day and `hour` truncated
     to a whole number (`.astype(int)`).
     """
-    # TODO: your code here
-    pass
+    df = visits if shop is None else visits[visits["shop"] == shop]
+    hour = df["hour"].astype(int)
+    table = df.assign(hour_int=hour).pivot_table(
+        index="reason",
+        columns="hour_int",
+        values="order_id",
+        aggfunc="count",
+        fill_value=0,
+    )
+    return table.reindex(index=REASONS, columns=OPEN_HOURS, fill_value=0)
 
 
 def monthly_sales(orders: pd.DataFrame, by: str = "shop") -> pd.DataFrame:
@@ -70,8 +84,16 @@ def monthly_sales(orders: pd.DataFrame, by: str = "shop") -> pd.DataFrame:
     - `groupby(["month", by])` and `.agg(sales=("total", "sum"),
       orders=("order_id", "count"))`, then `reset_index()`.
     """
-    # TODO: your code here
-    pass
+    month = orders["timestamp"].dt.strftime("%Y-%m")
+    df = orders.assign(month=month)
+    grouped = (
+        df.groupby(["month", by], as_index=False)
+        .agg(sales=("total", "sum"), orders=("order_id", "count"))
+        .sort_values(["month", by])
+        .reset_index(drop=True)
+    )
+    grouped["sales"] = grouped["sales"].round(2)
+    return grouped
 
 
 def members_by_zip(customers: pd.DataFrame) -> pd.DataFrame:
@@ -80,8 +102,13 @@ def members_by_zip(customers: pd.DataFrame) -> pd.DataFrame:
     `customers` comes from add_zips (it has `home_zip`). Members whose home is in
     no ZIP are left out.
     """
-    # TODO: your code here
-    pass
+    valid = customers.dropna(subset=["home_zip"])
+    counts = valid["home_zip"].value_counts().reset_index()
+    counts.columns = ["zip", "members"]
+    sorted_counts = counts.sort_values(
+        ["members", "zip"], ascending=[False, True]
+    ).reset_index(drop=True)
+    return sorted_counts
 
 
 def add_anchor_zip(visits: pd.DataFrame) -> pd.DataFrame:
@@ -95,8 +122,17 @@ def add_anchor_zip(visits: pd.DataFrame) -> pd.DataFrame:
     `np.select` with those two conditions and `default=None` builds it in one
     line. A new DataFrame; `visits` is not changed.
     """
-    # TODO: your code here
-    pass
+    result = visits.copy()
+    conditions = [
+        result["reason"].isin(WORKDAY_REASONS),
+        result["reason"] == NEAR_HOME,
+    ]
+    choices = [
+        result["work_zip"],
+        result["home_zip"],
+    ]
+    result["anchor_zip"] = np.select(conditions, choices, default=None)
+    return result
 
 
 def demand_by_zip(visits: pd.DataFrame) -> pd.DataFrame:
@@ -106,8 +142,14 @@ def demand_by_zip(visits: pd.DataFrame) -> pd.DataFrame:
     Calls add_anchor_zip, then counts `anchor_zip` like members_by_zip counts
     `home_zip`.
     """
-    # TODO: your code here
-    pass
+    anchored = add_anchor_zip(visits)
+    valid = anchored.dropna(subset=["anchor_zip"])
+    counts = valid["anchor_zip"].value_counts().reset_index()
+    counts.columns = ["zip", "visits"]
+    sorted_counts = counts.sort_values(
+        ["visits", "zip"], ascending=[False, True]
+    ).reset_index(drop=True)
+    return sorted_counts
 
 
 def site_scores(demand: pd.DataFrame, zips: gpd.GeoDataFrame,

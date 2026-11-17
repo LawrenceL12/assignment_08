@@ -61,22 +61,34 @@ if busy.open:
             st.pyplot(fig)
             close(fig)
 
-# 4. WHY THEY COME  — you write this tab.
-#    a. choice <- st.selectbox("Shop", ["All shops"] + our_shops, key="why_shop"),
-#       just like When we're busy. shown <- the visits at that shop (or all of them).
-#    b. One st.metric per reason, in settings.REASONS order: how many of `shown`
-#       got it (value_counts(), then .reindex(REASONS, fill_value=0) so a reason
-#       with no visits still shows 0), side by side in st.columns.
-#    c. make_heatmap(reason_table(visits, the shop or None), a title naming the
-#       choice) — your classifier's eye test. st.pyplot(fig), then close(fig).
-#    d. Two columns, the same charts as When we're busy but broken down by reason,
-#       for the visits in `shown`: make_trend(monthly_sales(shown, "reason"),
-#       "reason", "orders") with st.plotly_chart, and make_violin(shown, "reason")
-#       with st.pyplot (and close).
+# 4. WHY THEY COME
 if why.open:
     with why:
-        # TODO: steps 4a-4d
-        st.info("Why they come: your tab goes here.")
+        choice = st.selectbox("Shop", ["All shops"] + our_shops, key="why_shop")
+        shop = None if choice == "All shops" else choice
+        shown = visits if shop is None else visits[visits["shop"] == shop]
+
+        counts = shown["reason"].value_counts().reindex(REASONS, fill_value=0)
+        cols = st.columns(len(REASONS))
+        for col, reason in zip(cols, REASONS):
+            with col:
+                st.metric(label=reason, value=f"{counts[reason]:,}")
+
+        fig = make_heatmap(
+            reason_table(visits, shop), f"Visits by reason and hour: {choice}"
+        )
+        st.pyplot(fig)
+        close(fig)
+
+        left, right = st.columns(2)
+        with left:
+            st.plotly_chart(
+                make_trend(monthly_sales(shown, "reason"), "reason", "orders")
+            )
+        with right:
+            fig = make_violin(shown, "reason")
+            st.pyplot(fig)
+            close(fig)
 
 # 5. WHERE WE ARE  (provided)
 if where.open:
@@ -84,17 +96,37 @@ if where.open:
         st_folium(make_shop_map(shops, orders), height=500, use_container_width=True,
                   returned_objects=[], key="shops")
 
-# 6. WHERE TO OPEN NEXT  — you write this tab.
-#    a. Two columns, two choropleths with the shops on top (make_choropleth(...,
-#       shops)): members_by_zip(customers) colored by "members" — "Where members
-#       live"; demand <- demand_by_zip(visits), colored by "visits" — "Where
-#       members are when they buy".
-#    b. scores <- site_scores(demand, zips, shops) (provided); a third choropleth
-#       colored by "score".
-#    c. winner <- the first row of scores. st.success naming its ZIP, its visits and
-#       how far the nearest Salt City shop is (ours_km).
-#    d. st.dataframe of the top 10 scores (hide_index=True).
+# 6. WHERE TO OPEN NEXT
 if next_shop.open:
     with next_shop:
-        # TODO: steps 6a-6d
-        st.info("Where to open next: your tab goes here.")
+        members = members_by_zip(customers)
+        demand = demand_by_zip(visits)
+
+        left, right = st.columns(2)
+        with left:
+            st.plotly_chart(
+                make_choropleth(
+                    zips, members, "members", "Where members live", shops
+                )
+            )
+        with right:
+            st.plotly_chart(
+                make_choropleth(
+                    zips, demand, "visits", "Where members are when they buy", shops
+                )
+            )
+
+        scores = site_scores(demand, zips, shops)
+        st.plotly_chart(
+            make_choropleth(
+                zips, scores, "score", "Site scores for shop #4", shops
+            )
+        )
+
+        winner = scores.iloc[0]
+        st.success(
+            f"Shop #4 should open in ZIP {winner['zip']}: anchors "
+            f"{winner['visits']:,} visits, and the nearest Salt City shop is "
+            f"{winner['ours_km']} km away."
+        )
+        st.dataframe(scores.head(10), hide_index=True)
